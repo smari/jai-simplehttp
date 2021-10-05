@@ -1,4 +1,4 @@
-# Super basic HTTP server
+# Super basic HTTP server library
 
 A super simple HTTP server library for Jai. 
 
