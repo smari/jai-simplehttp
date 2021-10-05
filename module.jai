@@ -27,7 +27,7 @@ HTTPHeader :: struct {
 }
 
 HTTPRequest :: struct {
-    verb            : string;
+    verb            : HTTPVerbs;
     uri             : string;
     protocol        : string;
     headers         : [..]HTTPHeader;
@@ -70,9 +70,15 @@ http_register_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs
 
 
 http_get_status_text :: (status: int) -> string {
+    // TODO: This is a partial list.
     if status == {
         case 200; return "OK";
+        case 400; return "Bad Request";
+        case 401; return "Unauthorized";
+        case 403; return "Forbidden";
         case 404; return "Not Found";
+        case 418; return "I'm a teapot";
+        case; return "Confused";
     }
 }
 
@@ -121,31 +127,45 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
     firstline := headers[0];
     verb, uri, protocol : string;
 
-    // array_unordered_remove_by_index(*headers, 0);
     found, verb, firstline  = split_from_left(firstline, " ");
     found, uri, protocol    = split_from_left(firstline, " ");
 
-    request.verb     = copy_string(verb);
+    response: HTTPResponse;
+
+    if verb == {
+        case "GET";     request.verb = .GET;
+        case "POST";    request.verb = .POST;
+        case "PUT";     request.verb = .PUT;
+        case "DELETE";  request.verb = .DELETE;
+        case "PATCH";   request.verb = .PATCH;
+        case "TRACE";   request.verb = .TRACE;
+        case "OPTIONS"; request.verb = .OPTIONS;
+        case "CONNECT"; request.verb = .CONNECT;
+        case "HEAD";    request.verb = .HEAD;
+        case; response.status = 400;
+    }
+
     request.uri      = copy_string(uri);
     request.protocol = copy_string(protocol);
-
-    defer free(request.verb);
     defer free(request.uri);
     defer free(request.protocol);
 
-    response: HTTPResponse;
     for route:server.routes {
-        if request.uri == route.path {
+        if request.uri == route.path && (request.verb & route.accept_verbs) {
             response = route.handler(request);
             break;
         }
     }
+
     if !response.status {
         response.status = 404;
         response.body = HTTP_404_DEFAULT;
     }
 
     http_send_response(request, response);
+
+    // TODO: Here we leak the memory from the response, mostly the body. 
+    //       This is bad! Let's figure out a better way to do this.
 
     return .NoProblem;
 }
@@ -184,7 +204,6 @@ http_server_run :: (server: *HTTPServer) -> HTTPServerError {
 
     defer close(server.socket);
 
-    print("Listening on %:%\n", server.listen_host, server.listen_port);
     while !server.shutdown {
         http_handle_request(server);
     }
