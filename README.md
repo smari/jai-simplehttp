@@ -15,12 +15,22 @@ Anyway, enjoy.
 
 ## Usage
 
-Example in `test.jai`.
+A very basic example is available in `test.jai`. Compile it with `jai test.jai -import_dir ../` or equivalent.
+
+By default, the library relies on the [Uniform](https://github.com/rluba/uniform) regex library. However,
+this dependency is optional and can be turned off with the `USE_REGEX` module parameter. For instance:
+
+```
+#import "SimpleHTTP" (USE_REGEX=false);
+```
+
+Another parameter (used the same way) is `USE_LOGGING`. It defaults to on, and will cause a `log` call to be made
+for each valid HTTP request.
 
 ## Author
 
-Smári McCarthy
+Smári McCarthy.
 
 ## License
 
-BSD, or something. Just be reasonable.
+Public Domain.

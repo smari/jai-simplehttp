@@ -1,4 +1,5 @@
-#load "module.jai";
+#import "SimpleHTTP";
+#import "Basic";
 
 root :: (client: *HTTPRequest) -> HTTPResponse {
     response : HTTPResponse;
@@ -22,5 +23,8 @@ main :: () {
     http_register_url(*server, "/post/", .POST, post_only);
 
     print("Starting server on %:%\n", server.listen_host, server.listen_port);
-    http_server_run(*server);
+    err := http_server_run(*server);
+    if err != .NoProblem {
+        print("Server error: %\n", err);
+    }
 }
