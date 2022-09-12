@@ -46,7 +46,8 @@ HTTPRequest :: struct {
     uri             : string;
     protocol        : string;
     headers         : [..]HTTPHeader;
-    url_params      : []string;
+    url_captures    : []string;
+    url_params      : Table(string, string);
     body            : string;
     client          : HTTPClientConnection;
 }
@@ -149,7 +150,7 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
     for i:1..headers.count-1 {
         h : HTTPHeader;
         found, k, v := split_from_left(headers[i], ":");
-        h.key = copy_string(trim(k));
+        h.key   = copy_string(trim(k));
         h.value = copy_string(trim(v));
         array_add(*request.headers, h);
     }
@@ -180,17 +181,24 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
         }
     }
 
+    url_params : string;
+    found, uri, url_params  = split_from_left(uri, "?");
+    if found {
+        parse_url_params(request, url_params);
+    }
+
     request.uri      = copy_string(uri);
     request.protocol = copy_string(protocol);
     defer free(request.uri);
     defer free(request.protocol);
+    defer table_reset(*request.url_params);
 
     for route:server.routes {
         #if USE_REGEX {
             matched, captures := match(request.uri, route.regex);
             defer array_free(captures);
             if matched && (request.verb & route.accept_verbs) {
-                request.url_params = captures;
+                request.url_captures = captures;
                 response = route.handler(request);
                 break;
             }
@@ -198,7 +206,7 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
             if request.uri == route.path && (request.verb & route.accept_verbs) {
                 response = route.handler(request);
                 break;
-            }                
+            }
         }
     }
 
@@ -211,8 +219,8 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
 
     http_send_response(request, response);
 
-    // TODO: Here we leak the memory from the response, mostly the body. 
-    //       This is bad! Let's figure out a better way to do this.
+    //free(response.body);
+    array_reset(*response.headers);
 
     return .NoProblem;
 }
@@ -261,11 +269,75 @@ http_server_run :: (server: *HTTPServer) -> HTTPServerError {
 }
 
 
+param_in_query :: (request: *HTTPRequest, param: string) -> bool {
+    val, found := table_find(*request.url_params, param);
+    return found;
+}
+
+get_param_string :: (request: *HTTPRequest, param: string, default: string = "") -> string, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return default, false;
+    return val, true;
+}
+
+get_param_int :: (request: *HTTPRequest, param: string, default: int = 0) -> int, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return default, false;
+    return string_to_int(val), true;
+}
+
+get_param_float :: (request: *HTTPRequest, param: string, default: float = 0.0) -> float, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return default, false;
+    return string_to_float(val), true;
+}
+
+
+#scope_file
+
+parse_url_params :: (request: *HTTPRequest, params: string) {
+    // TODO: Decode URI components correctly.
+    paramset := split(params, "&");
+    for paramset {
+        found, key, value := split_from_left(it, "=");
+        if found {
+            table_add(*request.url_params, key, value);
+        } else {
+            log_error("Problematic parameter '%'\n", it);
+        }
+    }
+}
+
+
+decode_uri_component :: (s: string) {
+    regex : Regexp = compile("(%([0-9a-f]{2}))+");
+    matched, captures := match(s, regex);
+    /*
+    enc ? ((s, enc) => {
+        let regex = /(%([0-9a-f]{2}))+/gi;
+        let res = null, lastIdx = 0, parts = [];
+        while (res = regex.exec(s)) {
+            parts.push(s.substring(lastIdx, regex.lastIndex - res[0].length));
+            parts.push(iconv.decode(new Buffer(res[0].split(/%([0-9a-f]{2})/i).reduce((buff, v) => {
+                if (v !== '') buff.push(parseInt(v, 16));
+                return buff;
+            }, [])), enc));
+            lastIdx = regex.lastIndex;
+        }
+        parts.push(s.substring(lastIdx, s.length));
+        return parts.join('');
+    })(s, enc) : (s => s.split(/(%u[0-9a-f]{4})/gi).map(v =>
+        v.match(/%u[0-9a-f]{4}/gi) ? unescape(v) : decodeURIComponent(v)).join(''))(s);
+    */
+}
+
+
 #scope_file
 #import "POSIX";
 #import "Socket";
 #import "Basic";
 #import "String";
+#import "Hash_Table";
 #if USE_REGEX {
     #import "uniform";
 }
