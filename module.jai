@@ -1,4 +1,4 @@
-// SimpleHTTP v0.2
+// SimpleHTTP v0.3
 // Smári McCarthy <smari@ecosophy.is>
 //
 // See README.md for details.
