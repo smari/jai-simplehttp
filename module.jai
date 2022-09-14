@@ -1,4 +1,4 @@
-// SimpleHTTP v0.3
+// SimpleHTTP v0.3.1
 // Smári McCarthy <smari@ecosophy.is>
 //
 // See README.md for details.
@@ -125,7 +125,7 @@ http_send_response :: (request: *HTTPRequest, response: HTTPResponse) {
 http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
     req : [BUFFER_MAX]u8;
     request := New(HTTPRequest);
-    defer free(request);
+    defer free_request(request);
     client  : HTTPClientConnection;
 
     client.socket, client.address = accept(server.socket);
@@ -154,7 +154,6 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
         h.value = copy_string(trim(v));
         array_add(*request.headers, h);
     }
-    defer array_reset(*request.headers);
 
     firstline := headers[0];
     verb, uri, protocol : string;
@@ -189,9 +188,6 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
 
     request.uri      = copy_string(uri);
     request.protocol = copy_string(protocol);
-    defer free(request.uri);
-    defer free(request.protocol);
-    defer table_reset(*request.url_params);
 
     for route:server.routes {
         #if USE_REGEX {
@@ -219,10 +215,28 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
 
     http_send_response(request, response);
 
-    //free(response.body);
-    array_reset(*response.headers);
+    free_response(response);
 
     return .NoProblem;
+}
+
+
+free_response :: (response: HTTPResponse) {
+    //free(response.body);
+    array_reset(*response.headers);
+}
+
+free_request :: (request: *HTTPRequest) {
+    free(request.uri);
+    free(request.protocol);
+    for request.headers {
+        free(it.key);
+        free(it.value);
+    }
+    array_reset(*request.headers);
+    table_reset(*request.url_params);
+    uninit(*request.url_params);
+    free(request);
 }
 
 
@@ -292,6 +306,51 @@ get_param_float :: (request: *HTTPRequest, param: string, default: float = 0.0) 
     return string_to_float(val), true;
 }
 
+get_param_float_array :: (request: *HTTPRequest, param: string) -> []float, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return float.[], false;
+    str_vals := split(val, ",");
+    vals : []float;
+    vals.data  = alloc(str_vals.count * size_of(float));
+    vals.count = str_vals.count;
+    for str_vals {
+        vals[it_index] = string_to_float(it);
+    }
+    return vals, true;
+}
+
+get_param_int_array :: (request: *HTTPRequest, param: string) -> []int, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return int.[], false;
+    str_vals := split(val, ",");
+    vals : []int;
+    vals.data  = alloc(str_vals.count * size_of(int));
+    vals.count = str_vals.count;
+    for str_vals {
+        vals[it_index] = string_to_int(it);
+    }
+    return vals, true;
+}
+
+get_param_hex_int_array :: (request: *HTTPRequest, param: string) -> []int, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return int.[], false;
+    str_vals := split(val, ",");
+    vals : []int;
+    vals.data  = alloc(str_vals.count * size_of(int));
+    vals.count = str_vals.count;
+    for str_vals {
+        vals[it_index] = string_to_int(it, base=16);
+    }
+    return vals, true;
+}
+
+get_param_string_array :: (request: *HTTPRequest, param: string) -> []string, bool {
+    val, found := table_find(*request.url_params, param);
+    if !found return string.[], false;
+    str_vals := split(copy_string(val), ",");
+    return str_vals, true;
+}
 
 #scope_file
 
@@ -301,6 +360,8 @@ parse_url_params :: (request: *HTTPRequest, params: string) {
     for paramset {
         found, key, value := split_from_left(it, "=");
         if found {
+            key   = decode_uri_component(key);
+            value = decode_uri_component(value);
             table_add(*request.url_params, key, value);
         } else {
             log_error("Problematic parameter '%'\n", it);
@@ -309,26 +370,63 @@ parse_url_params :: (request: *HTTPRequest, params: string) {
 }
 
 
-decode_uri_component :: (s: string) {
-    regex : Regexp = compile("(%([0-9a-f]{2}))+");
-    matched, captures := match(s, regex);
-    /*
-    enc ? ((s, enc) => {
-        let regex = /(%([0-9a-f]{2}))+/gi;
-        let res = null, lastIdx = 0, parts = [];
-        while (res = regex.exec(s)) {
-            parts.push(s.substring(lastIdx, regex.lastIndex - res[0].length));
-            parts.push(iconv.decode(new Buffer(res[0].split(/%([0-9a-f]{2})/i).reduce((buff, v) => {
-                if (v !== '') buff.push(parseInt(v, 16));
-                return buff;
-            }, [])), enc));
-            lastIdx = regex.lastIndex;
+is_hex_digit :: (c: u8) -> bool {
+    return (c >= #char "0" && c <= #char "9")
+        || (c >= #char "a" && c <= #char "f")
+        || (c >= #char "A" && c <= #char "F");
+}
+
+#scope_export
+decode_uri_component :: (s: string) -> string {
+    // Note: We allocate the same length as the
+    //       original string, as we are guaranteed
+    //       that the decoded string is of equal
+    //       or lesser length.
+    //       For space efficiency, we could buffer
+    //       the output string and allocate exactly
+    //       the number of bytes needed, but it 
+    //       barely matters...
+    in   := s;
+    out  : string;
+    out.data = alloc(in.count);
+    out.count = 1;
+
+    while in.count > 0 {
+        if (in[0] == #char "%" && in.count >= 2 
+         && is_hex_digit(in[1]) && is_hex_digit(in[2])
+        ) {
+            a := in[1];
+            b := in[2];
+
+            if a >= #char "a"
+                a -= #char "a" - #char "A";
+            if a >= #char "A"
+                a -= #char "A" - 10;
+            else
+                a -= #char "0";
+
+            if b >= #char "a"
+                b -= #char "a" - #char "A";
+            if b >= #char "A"
+                b -= #char "A" - 10;
+            else
+                b -= #char "0";
+
+            out[out.count-1] = 16*a+b;
+            out.count += 1;
+            advance(*in, 3);
+        } else if in[0] == #char "+" {
+            out[out.count-1] = #char " ";
+            out.count += 1;
+            advance(*in);
+        } else {
+            out[out.count-1] = in[0];
+            out.count += 1;
+            advance(*in);
         }
-        parts.push(s.substring(lastIdx, s.length));
-        return parts.join('');
-    })(s, enc) : (s => s.split(/(%u[0-9a-f]{4})/gi).map(v =>
-        v.match(/%u[0-9a-f]{4}/gi) ? unescape(v) : decodeURIComponent(v)).join(''))(s);
-    */
+    }
+    out.count -= 1;
+    return out;
 }
 
 
