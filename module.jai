@@ -99,6 +99,7 @@ http_get_status_text :: (status: int) -> string {
         case 403; return "Forbidden";
         case 404; return "Not Found";
         case 418; return "I'm a teapot";
+        case 500; return "Internal server error";
         case; return "Confused";
     }
 }
