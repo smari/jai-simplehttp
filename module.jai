@@ -50,6 +50,7 @@ HTTPRequest :: struct {
     url_params      : Table(string, string);
     body            : string;
     client          : HTTPClientConnection;
+    server          : *HTTPServer;
 }
 
 HTTPResponse :: struct {
@@ -123,22 +124,28 @@ http_send_response :: (request: *HTTPRequest, response: HTTPResponse) {
 }
 
 
-http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
-    req : [BUFFER_MAX]u8;
-    request := New(HTTPRequest);
-    defer free_request(request);
+http_accept_client :: (server: *HTTPServer) -> *HTTPRequest {
     client  : HTTPClientConnection;
 
     client.socket, client.address = accept(server.socket);
-    if client.socket < 0 { return .Accept; }
-    defer close(client.socket);
+    if client.socket < 0 {
+        return null; 
+    }
+    request := New(HTTPRequest);
+    request.client = client;
+    request.server = server;
+    return request;
+}
 
-    n := read(client.socket, *req, BUFFER_MAX);
+
+http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
+    req : [BUFFER_MAX]u8;
+
+    // TODO: Handle longer requests
+    n := read(request.client.socket, *req, BUFFER_MAX);
     if n < 0           return .SocketRead;
     if n >= BUFFER_MAX return .RequestTooBig;
     if req[0] == 0     return .Spurious;
-
-    request.client = client;
 
     requestbody := to_string(req);
 
@@ -190,7 +197,7 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
     request.uri      = copy_string(uri);
     request.protocol = copy_string(protocol);
 
-    for route:server.routes {
+    for route:request.server.routes {
         #if USE_REGEX {
             matched, captures := match(request.uri, route.regex);
             defer array_free(captures);
@@ -212,10 +219,12 @@ http_handle_request :: (server: *HTTPServer) -> HTTPServerError {
         response.body = HTTP_404_DEFAULT;
     }
 
-    #if USE_LOGGING log("[%] [%] % %\n", to_string(client.address), response.status, request.verb, request.uri);
+    #if USE_LOGGING log("[%] [%] % %\n", to_string(request.client.address), response.status, request.verb, request.uri);
 
     http_send_response(request, response);
 
+    close(request.client.socket);
+    free_request(request);
     free_response(response);
 
     return .NoProblem;
@@ -251,7 +260,7 @@ http_server_setup :: (listen_host: string, listen_port: u16) -> HTTPServer {
 }
 
 
-http_server_run :: (server: *HTTPServer) -> HTTPServerError {
+http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
     server.socket = socket(AF_INET, SOCK_STREAM, 0);
     if server.socket < 0 {
         return .Socket;
@@ -272,13 +281,20 @@ http_server_run :: (server: *HTTPServer) -> HTTPServerError {
     }
     if listen(server.socket, 5) < 0 return .Socket;
 
+    return .NoProblem;  
+}
+
+
+http_server_run_single_threaded :: (server: *HTTPServer) -> HTTPServerError {
+    started := http_server_listen(server);
+    if started != .NoProblem { return started; }
     defer close(server.socket);
 
     while !server.shutdown {
-        http_handle_request(server);
+        request := http_accept_client(server);
+        if request == null continue;
+        http_handle_request(server, request);
     }
-
-    print("Serer shut down.\n");
 
     return .NoProblem;
 }
