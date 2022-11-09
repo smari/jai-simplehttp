@@ -456,3 +456,12 @@ decode_uri_component :: (s: string) -> string {
 #if USE_REGEX {
     #import "uniform";
 }
+
+write :: inline (fd: s32, msg: string) -> s64 {
+    return write(fd, cast(*void) msg.data, cast(size_t) msg.count);
+}
+
+write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
+    tmp := tprint(buf, ..args);
+    return write(fd, tmp.data, cast(size_t) tmp.count);
+}
