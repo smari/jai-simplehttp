@@ -245,7 +245,7 @@ free_request :: (request: *HTTPRequest) {
     }
     array_reset(*request.headers);
     table_reset(*request.url_params);
-    uninit(*request.url_params);
+    deinit(*request.url_params);
     free(request);
 }
 
@@ -261,7 +261,7 @@ http_server_setup :: (listen_host: string, listen_port: u16) -> HTTPServer {
 
 
 http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
-    server.socket = socket(AF_INET, SOCK_STREAM, 0);
+    server.socket = socket(AF_INET, .SOCK_STREAM, 0);
     if server.socket < 0 {
         return .Socket;
     }
@@ -448,6 +448,12 @@ decode_uri_component :: (s: string) -> string {
 
 
 #scope_file
+
+write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
+    tmp := tprint(buf, ..args);
+    return write(fd, tmp.data, cast(size_t) tmp.count);
+}
+
 #import "POSIX";
 #import "Socket";
 #import "Basic";
