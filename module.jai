@@ -449,11 +449,6 @@ decode_uri_component :: (s: string) -> string {
 
 #scope_file
 
-write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
-    tmp := tprint(buf, ..args);
-    return write(fd, tmp.data, cast(size_t) tmp.count);
-}
-
 #import "POSIX";
 #import "Socket";
 #import "Basic";
