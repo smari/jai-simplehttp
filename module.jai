@@ -145,7 +145,6 @@ http_response_header_add :: (response: *HTTPResponse, header: string, content: s
 http_send_response :: (request: *HTTPRequest, response: HTTPResponse) {
     write(request.client.socket, "HTTP/1.0 % %\r\n", response.status, http_get_status_text(response.status));
     for h:response.headers {
-        print("Writing response header %:%\n", h.key, h.value);
         write(request.client.socket, "%: %\r\n", h.key, h.value);
     }
     write(request.client.socket, "\r\n");
