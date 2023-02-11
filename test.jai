@@ -1,4 +1,4 @@
-#import "SimpleHTTP";
+#import "SimpleHTTP"(USE_MIDDLEWARE=false);
 #import "Basic";
 
 root :: (client: *HTTPRequest) -> HTTPResponse {
@@ -52,7 +52,7 @@ main :: () {
     http_register_url(*server, "/post/", .POST, post_only);
 
     print("Starting server on %:%\n", server.listen_host, server.listen_port);
-    err := http_server_run(*server);
+    err := http_server_run_single_threaded(*server);
     if err != .NoProblem {
         print("Server error: %\n", err);
     }

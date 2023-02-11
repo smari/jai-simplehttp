@@ -1,13 +1,18 @@
-// SimpleHTTP v0.3.1
+// SimpleHTTP v0.4.0
 // Smári McCarthy <smari@ecosophy.is>
 //
 // See README.md for details.
 //
 // Module parameters:
-//   - USE_REGEX:   Whether to depend on the Uniform regex library.
-//   - USE_LOGGING: Whether to log accesses.
+//   - USE_REGEX:      Whether to depend on the Uniform regex library.
+//   - USE_LOGGING:    Whether to log accesses.
+//   - USE_MIDDLEWARE: Whether to process middleware before/after requests.
 //
-#module_parameters(USE_REGEX := true, USE_LOGGING := true);
+#module_parameters(
+    USE_REGEX       := true, 
+    USE_LOGGING     := true,
+    USE_MIDDLEWARE  := true
+);
 
 HTTP_404_DEFAULT :: "<html><body><h1>404 File not found</h1></body></html>";
 
@@ -17,6 +22,10 @@ HTTPVerbs :: enum_flags {
 }
 
 HTTPRouteHandler :: #type (client: *HTTPRequest) -> HTTPResponse;
+#if USE_MIDDLEWARE {
+    HTTPRequestMiddleware :: #type (client: *HTTPRequest) -> HTTPMiddlewareResult;
+    HTTPResponseMiddleware :: #type (client: *HTTPResponse) -> HTTPMiddlewareResult;
+}
 
 HTTPRoute :: struct {
     path            : string;
@@ -28,12 +37,21 @@ HTTPRoute :: struct {
     handler         : HTTPRouteHandler;
 }
 
+HTTPMiddlewareResult :: struct {
+    error           : bool;
+    response        : HTTPResponse;
+}
+
 HTTPServer :: struct {
     socket          : s32;
     listen_host     : string;
     listen_port     : u16;
     shutdown        : bool;
     routes          : [..]HTTPRoute;
+    #if USE_MIDDLEWARE {
+        request_middleware   : [..]HTTPRequestMiddleware;
+        response_middleware  : [..]HTTPResponseMiddleware;
+    }
 }
 
 HTTPHeader :: struct {
@@ -90,6 +108,16 @@ http_register_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs
     array_add(*server.routes, r);
 }
 
+#if USE_MIDDLEWARE {
+    http_register_request_middleware :: (server: *HTTPServer, mw: HTTPRequestMiddleware) {
+        array_add(*server.request_middleware, mw);
+    }
+
+    http_register_response_middleware :: (server: *HTTPServer, mw: HTTPResponseMiddleware) {
+        array_add(*server.response_middleware, mw);
+    }    
+}
+
 
 http_get_status_text :: (status: int) -> string {
     // TODO: This is a partial list.
@@ -117,6 +145,7 @@ http_response_header_add :: (response: *HTTPResponse, header: string, content: s
 http_send_response :: (request: *HTTPRequest, response: HTTPResponse) {
     write(request.client.socket, "HTTP/1.0 % %\r\n", response.status, http_get_status_text(response.status));
     for h:response.headers {
+        print("Writing response header %:%\n", h.key, h.value);
         write(request.client.socket, "%: %\r\n", h.key, h.value);
     }
     write(request.client.socket, "\r\n");
@@ -140,6 +169,10 @@ http_accept_client :: (server: *HTTPServer) -> *HTTPRequest {
 
 http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     req : [BUFFER_MAX]u8;
+
+    // Make sure we always clean up after ourselves.
+    defer close(request.client.socket);
+    defer free_request(request);
 
     // TODO: Handle longer requests
     n := read(request.client.socket, *req, BUFFER_MAX);
@@ -197,39 +230,82 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     request.uri      = copy_string(uri);
     request.protocol = copy_string(protocol);
 
-    for route:request.server.routes {
-        #if USE_REGEX {
-            matched, captures := match(request.uri, route.regex);
-            defer array_free(captures);
-            if matched && (request.verb & route.accept_verbs) {
-                request.url_captures = captures;
-                response = route.handler(request);
-                break;
+    // Okay, now everything is set up.
+
+    // TODO(smari): middleware_okay check should only happen if we support middleware.
+    middleware_okay := true;
+    #if USE_MIDDLEWARE {
+        // First, we run request middleware:
+        for request.server.request_middleware {
+            result := it(request);
+            if result.error {
+                middleware_okay = false;
+                http_send_response(request, result.response);
+                free_response(result.response);
+
+                // Middleware interupting the request is the middleware's 
+                // problem, but does not actually count as a server error.
+                return .NoProblem;
             }
-        } else {
-            if request.uri == route.path && (request.verb & route.accept_verbs) {
-                response = route.handler(request);
-                break;
-            }
-        }
+        }        
     }
 
+    // Now we check the URL routes and dispatch.
+    if middleware_okay {
+        for route:request.server.routes {
+            #if USE_REGEX {
+                matched, captures := match(request.uri, route.regex);
+                defer array_free(captures);
+                if matched && (request.verb & route.accept_verbs) {
+                    request.url_captures = captures;
+                    response = route.handler(request);
+                    break;
+                }
+            } else {
+                if request.uri == route.path && (request.verb & route.accept_verbs) {
+                    response = route.handler(request);
+                    break;
+                }
+            }
+        }
+        //dispatch_routes(request, *response);
+    }
+
+    // If nothing was found, we set us up to return a 404.
     if !response.status {
         response.status = 404;
         response.body = HTTP_404_DEFAULT;
     }
 
-    #if USE_LOGGING log("[%] [%] % %\n", to_string(request.client.address), response.status, request.verb, request.uri);
+    #if USE_MIDDLEWARE {    
+        // Finally, we run any response middleware.
+        middleware_okay = true;
+        for request.server.response_middleware {
+            result := it(*response);
+            if result.error {
+                middleware_okay = false;
+                http_send_response(request, result.response);
+                free_response(result.response);
 
+                // Middleware interupting the request is the middleware's 
+                // problem, but does not actually count as a server error.
+                return .NoProblem;
+            }
+        }
+    }
+
+    // All done. Now send the response and log it.
     http_send_response(request, response);
-
-    close(request.client.socket);
-    free_request(request);
+    #if USE_LOGGING log("[%] [%] % %\n", to_string(request.client.address), response.status, request.verb, request.uri);
     free_response(response);
 
     return .NoProblem;
 }
 
+
+dispatch_routes :: (request: *HTTPRequest, response: *HTTPResponse) {
+
+}
 
 free_response :: (response: HTTPResponse) {
     //free(response.body);
@@ -293,7 +369,7 @@ http_server_run_single_threaded :: (server: *HTTPServer) -> HTTPServerError {
     while !server.shutdown {
         request := http_accept_client(server);
         if request == null continue;
-        http_handle_request(server, request);
+        http_handle_request(request);
     }
 
     return .NoProblem;

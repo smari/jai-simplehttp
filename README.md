@@ -27,6 +27,13 @@ this dependency is optional and can be turned off with the `USE_REGEX` module pa
 Another parameter (used the same way) is `USE_LOGGING`. It defaults to on, and will cause a `log` call to be made
 for each valid HTTP request.
 
+## Middleware
+
+We now support both request and response middleware. This barely counts as simple anymore, but here we are.
+Check out `test_middleware.jai` for usage, compiled the same way as `test.jai`.
+
+Middleware can similarly be turned off by setting `USE_MIDDLEWARE` to `false`.
+
 ## Author
 
 Smári McCarthy.
