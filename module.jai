@@ -14,6 +14,7 @@
     USE_MIDDLEWARE  := true
 );
 
+
 HTTP_404_DEFAULT :: "<html><body><h1>404 File not found</h1></body></html>";
 
 HTTPVerbs :: enum_flags {
@@ -95,7 +96,8 @@ HTTPServerError :: enum {
     Spurious;      // Spurious request; probably malformed.
 }
 
-BUFFER_MAX :: 65536;
+BUFFER_MAX :: 1024;
+REQUEST_MAX_SIZE :: 1024*1024*64;  // 64 Megabyte body!?
 
 http_register_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs, handler: HTTPRouteHandler) {
     r : HTTPRoute;
@@ -167,19 +169,31 @@ http_accept_client :: (server: *HTTPServer) -> *HTTPRequest {
 
 
 http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
-    req : [BUFFER_MAX]u8;
+    buf : [BUFFER_MAX+1]u8;
+    bufstr : string;
+    bufstr.data = buf.data;
+    req : String_Builder;
 
     // Make sure we always clean up after ourselves.
     defer close(request.client.socket);
     defer free_request(request);
 
-    // TODO: Handle longer requests
-    n := read(request.client.socket, *req, BUFFER_MAX);
-    if n < 0           return .SocketRead;
-    if n >= BUFFER_MAX return .RequestTooBig;
-    if req[0] == 0     return .Spurious;
+    while true {
+        n := read(request.client.socket, *buf, BUFFER_MAX);
+        print("Got % bytes!\n", n);
 
-    requestbody := to_string(req);
+        if n < 0           return .SocketRead;
+        if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
+        if buf[0] == 0     return .Spurious;
+
+        bufstr.count = n;
+        append(*req, bufstr);
+
+        if n != BUFFER_MAX break;
+        if builder_string_length(*req) > REQUEST_MAX_SIZE return .RequestTooBig;
+    }
+
+    requestbody := builder_to_string(*req);
 
     found, header, body := split_from_left(requestbody, "\r\n\r\n");
     if !found return .NotHTTP;
