@@ -180,7 +180,6 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
 
     while true {
         n := read(request.client.socket, *buf, BUFFER_MAX);
-        print("Got % bytes!\n", n);
 
         if n < 0           return .SocketRead;
         if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
