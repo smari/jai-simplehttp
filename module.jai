@@ -175,11 +175,11 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     req : String_Builder;
 
     // Make sure we always clean up after ourselves.
-    defer close(request.client.socket);
+    defer close_and_reset(*request.client.socket);
     defer free_request(request);
 
     while true {
-        n := read(request.client.socket, *buf, BUFFER_MAX);
+        n := recv(request.client.socket, *buf, BUFFER_MAX, 0);
 
         if n < 0           return .SocketRead;
         if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
@@ -360,11 +360,19 @@ http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
     }
 
     if bind(server.socket, server.listen_host, server.listen_port) < 0 {
-        err := errno();
-        if err == {
-            case EACCES; return .Access;
-            case EADDRINUSE; return .AddressInUse;
-            case; return .Socket;
+        err := get_last_socket_error();
+        #if OS == .WINDOWS {
+            if err == {
+                case WSAEACCES; return .Access;
+                case WSAEADDRINUSE; return .AddressInUse;
+                case; return .Socket;
+            }
+        } else {
+            if err == {
+                case EACCES; return .Access;
+                case EADDRINUSE; return .AddressInUse;
+                case; return .Socket;
+            }
         }
     }
     if listen(server.socket, 5) < 0 return .Socket;
@@ -537,7 +545,9 @@ decode_uri_component :: (s: string) -> string {
 
 #scope_file
 
-#import "POSIX";
+#if OS != .WINDOWS {
+    #import "POSIX";
+}
 #import "Socket";
 #import "Basic";
 #import "String";
@@ -547,10 +557,10 @@ decode_uri_component :: (s: string) -> string {
 }
 
 write :: inline (fd: s32, msg: string) -> s64 {
-    return write(fd, cast(*void) msg.data, cast(size_t) msg.count);
+    return send(fd, cast(*void) msg.data, xx msg.count, 0);
 }
 
 write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
     tmp := tprint(buf, ..args);
-    return write(fd, tmp.data, cast(size_t) tmp.count);
+    return send(fd, tmp.data, xx tmp.count, 0);
 }
