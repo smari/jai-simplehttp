@@ -11,7 +11,8 @@
 #module_parameters(
     USE_REGEX       := true, 
     USE_LOGGING     := true,
-    USE_MIDDLEWARE  := true
+    USE_MIDDLEWARE  := true,
+    USE_WEBSOCKETS  := true
 );
 
 
@@ -44,7 +45,11 @@ HTTPMiddlewareResult :: struct {
 }
 
 HTTPServer :: struct {
-    socket          : s32;
+    #if OS == .WINDOWS {
+        socket          : u64;
+    } else {
+        socket          : s32;
+    }
     listen_host     : string;
     listen_port     : u16;
     shutdown        : bool;
@@ -96,6 +101,7 @@ HTTPServerError :: enum {
     Spurious;      // Spurious request; probably malformed.
 }
 
+
 BUFFER_MAX :: 1024;
 REQUEST_MAX_SIZE :: 1024*1024*64;  // 64 Megabyte body!?
 
@@ -109,6 +115,19 @@ http_register_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs
     r.handler = handler;
     array_add(*server.routes, r);
 }
+
+
+http_register_websocket_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs, handler: HTTPRouteHandler) {
+    r : HTTPRoute;
+    r.path = path;
+    #if USE_REGEX {
+        r.regex = compile(r.path);
+    }
+    r.accept_verbs = accept_verbs;
+    r.handler = handler;
+    array_add(*server.routes, r);
+}
+
 
 #if USE_MIDDLEWARE {
     http_register_request_middleware :: (server: *HTTPServer, mw: HTTPRequestMiddleware) {
