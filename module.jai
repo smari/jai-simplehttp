@@ -11,8 +11,7 @@
 #module_parameters(
     USE_REGEX       := true, 
     USE_LOGGING     := true,
-    USE_MIDDLEWARE  := true,
-    USE_WEBSOCKETS  := true
+    USE_MIDDLEWARE  := true
 );
 
 
@@ -45,11 +44,7 @@ HTTPMiddlewareResult :: struct {
 }
 
 HTTPServer :: struct {
-    #if OS == .WINDOWS {
-        socket          : u64;
-    } else {
-        socket          : s32;
-    }
+    socket          : Socket;
     listen_host     : string;
     listen_port     : u16;
     shutdown        : bool;
@@ -84,7 +79,7 @@ HTTPResponse :: struct {
 }
 
 HTTPClientConnection :: struct {
-    socket          : s32;
+    socket          : Socket;
     address         : sockaddr_in;
 }
 
@@ -101,7 +96,6 @@ HTTPServerError :: enum {
     Spurious;      // Spurious request; probably malformed.
 }
 
-
 BUFFER_MAX :: 1024;
 REQUEST_MAX_SIZE :: 1024*1024*64;  // 64 Megabyte body!?
 
@@ -115,19 +109,6 @@ http_register_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs
     r.handler = handler;
     array_add(*server.routes, r);
 }
-
-
-http_register_websocket_url :: (server: *HTTPServer, path: string, accept_verbs: HTTPVerbs, handler: HTTPRouteHandler) {
-    r : HTTPRoute;
-    r.path = path;
-    #if USE_REGEX {
-        r.regex = compile(r.path);
-    }
-    r.accept_verbs = accept_verbs;
-    r.handler = handler;
-    array_add(*server.routes, r);
-}
-
 
 #if USE_MIDDLEWARE {
     http_register_request_middleware :: (server: *HTTPServer, mw: HTTPRequestMiddleware) {
@@ -198,7 +179,7 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     defer free_request(request);
 
     while true {
-        n := recv(request.client.socket, *buf, BUFFER_MAX, 0);
+        n := recv(request.client.socket, buf.data, BUFFER_MAX, 0);
 
         if n < 0           return .SocketRead;
         if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
@@ -372,12 +353,13 @@ http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
     if server.socket < 0 {
         return .Socket;
     }
-
-    optval : u32 = 1;
-    if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, *optval, 4) < 0 {
-        return .Socket;
+    #if OS != .WINDOWS {
+        optval : u32 = 1;
+        if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, *optval, 4) < 0 {
+            return .Socket;
+        }
     }
-
+    
     if bind(server.socket, server.listen_host, server.listen_port) < 0 {
         err := get_last_socket_error();
         #if OS == .WINDOWS {
@@ -575,11 +557,21 @@ decode_uri_component :: (s: string) -> string {
     #import "uniform";
 }
 
-write :: inline (fd: s32, msg: string) -> s64 {
+
+#if OS == .WINDOWS {
+Socket :: u64;
+}
+else{
+Socket :: s32;
+}
+
+
+
+write :: inline (fd: Socket, msg: string) -> s64 {
     return send(fd, cast(*void) msg.data, xx msg.count, 0);
 }
 
-write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
+write :: inline (fd: Socket, buf: string, args: ..Any) -> s64 {
     tmp := tprint(buf, ..args);
     return send(fd, tmp.data, xx tmp.count, 0);
 }
