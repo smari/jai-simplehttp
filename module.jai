@@ -349,6 +349,7 @@ http_server_setup :: (listen_host: string, listen_port: u16) -> HTTPServer {
 
 
 http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
+    socket_init();
     server.socket = socket(AF_INET, .SOCK_STREAM, 0);
     if server.socket < 0 {
         return .Socket;
