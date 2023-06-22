@@ -305,7 +305,7 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     // If nothing was found, we set us up to return a 404.
     if !response.status {
         response.status = 404;
-        response.body = HTTP_404_DEFAULT;
+        response.body = copy_string(HTTP_404_DEFAULT);
     }
 
     #if USE_MIDDLEWARE {    
@@ -339,7 +339,15 @@ dispatch_routes :: (request: *HTTPRequest, response: *HTTPResponse) {
 }
 
 free_response :: (response: HTTPResponse) {
-    //free(response.body);
+    if response.body != "" {
+        free(response.body);
+    }
+    
+    for response.headers {
+        free(it.key);
+        free(it.value);
+    }
+    
     array_reset(*response.headers);
 }
 
