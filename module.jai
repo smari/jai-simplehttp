@@ -194,7 +194,7 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     defer free_request(request);
 
     while true {
-        n := recv(request.client.socket, buf.data, BUFFER_MAX, 0);
+        n := recv(request.client.socket, xx *buf, BUFFER_MAX, 0);
 
         if n < 0           return .SocketRead;
         if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
@@ -380,7 +380,7 @@ http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
     }
 
     optval : u32 = 1;
-    if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, cast(*u8) *optval, 4) < 0 {
+    if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, xx *optval, 4) < 0 {
         return .Socket;
     }
 
