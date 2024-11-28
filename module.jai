@@ -45,11 +45,7 @@ HTTPMiddlewareResult :: struct {
 }
 
 HTTPServer :: struct {
-    #if OS == .WINDOWS {
-        socket          : u64;
-    } else {
-        socket          : s32;
-    }
+    socket          : Socket;
     listen_host     : string;
     listen_port     : u16;
     shutdown        : bool;
@@ -84,7 +80,7 @@ HTTPResponse :: struct {
 }
 
 HTTPClientConnection :: struct {
-    socket          : s32;
+    socket          : Socket;
     address         : sockaddr_in;
 }
 
@@ -198,7 +194,7 @@ http_handle_request :: (request: *HTTPRequest) -> HTTPServerError {
     defer free_request(request);
 
     while true {
-        n := recv(request.client.socket, *buf, BUFFER_MAX, 0);
+        n := recv(request.client.socket, xx *buf, BUFFER_MAX, 0);
 
         if n < 0           return .SocketRead;
         if n > BUFFER_MAX  return .RequestTooBig;   // Shouldn't happen.
@@ -376,13 +372,15 @@ http_server_setup :: (listen_host: string, listen_port: u16) -> HTTPServer {
 
 
 http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
+    socket_init();
+    
     server.socket = socket(AF_INET, .SOCK_STREAM, 0);
     if server.socket < 0 {
         return .Socket;
     }
 
     optval : u32 = 1;
-    if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, *optval, 4) < 0 {
+    if setsockopt(server.socket, SOL_SOCKET, SO_REUSEADDR, xx *optval, 4) < 0 {
         return .Socket;
     }
 
@@ -583,11 +581,11 @@ decode_uri_component :: (s: string) -> string {
     #import "uniform";
 }
 
-write :: inline (fd: s32, msg: string) -> s64 {
+write :: inline (fd: Socket, msg: string) -> s64 {
     return send(fd, cast(*void) msg.data, xx msg.count, 0);
 }
 
-write :: inline (fd: s32, buf: string, args: ..Any) -> s64 {
+write :: inline (fd: Socket, buf: string, args: ..Any) -> s64 {
     tmp := tprint(buf, ..args);
     return send(fd, tmp.data, xx tmp.count, 0);
 }
