@@ -40,4 +40,7 @@ Smári McCarthy.
 
 ## License
 
-Public Domain.
+Released under the terms of the Apache 2.0 License. See LICENSE for details.
+
+Note: Some previous versions were released into the Public Domain, and they 
+remain as such. Any further development after that follows the Apache 2.0 License.
