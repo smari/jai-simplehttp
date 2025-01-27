@@ -409,7 +409,7 @@ http_server_listen :: (server: *HTTPServer) -> HTTPServerError {
 http_server_run_single_threaded :: (server: *HTTPServer) -> HTTPServerError {
     started := http_server_listen(server);
     if started != .NoProblem { return started; }
-    defer close(server.socket);
+    defer close_and_reset(*server.socket);
 
     while !server.shutdown {
         request := http_accept_client(server);
