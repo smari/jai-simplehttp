@@ -1,10 +1,13 @@
 #import "SimpleHTTP"(USE_MIDDLEWARE=false);
 #import "Basic";
 
+HELLO_RESPONSE :: "<html><head></head><body>Hello, world!</body></html>";
+POST_RESPONSE  :: "<html><head></head><body>Post response!</body></html>";
+
 root :: (client: *HTTPRequest) -> HTTPResponse {
     response : HTTPResponse;
     response.status = 200;
-    response.body = "<html><head></head><body>Hello, world!</body></html>";
+    response.body = copy_string(HELLO_RESPONSE);
     return response;
 }
 
@@ -12,7 +15,7 @@ root :: (client: *HTTPRequest) -> HTTPResponse {
 post_only :: (client: *HTTPRequest) -> HTTPResponse {
     response : HTTPResponse;
     response.status = 200;
-    response.body = "<html><head></head><body>Post response!</body></html>";
+    response.body = copy_string(POST_RESPONSE);
     return response;
 }
 
